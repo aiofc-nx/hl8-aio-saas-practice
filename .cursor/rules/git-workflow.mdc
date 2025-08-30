@@ -1,0 +1,152 @@
+---
+description: Git 工作流规范
+globs:
+alwaysApply: false
+---
+
+# Git 工作流规范（Git Workflow Specification）
+
+**遵循 Git Flow 工作流，确保代码版本管理的规范性和可追溯性。**
+
+## **分支管理策略**
+
+### 主要分支
+
+- `main`: 生产环境分支，只接受来自 `develop` 的合并
+- `develop`: 开发环境分支，包含最新的开发功能
+- `feature/*`: 功能分支，从 `develop` 创建，完成后合并回 `develop`
+- `release/*`: 发布分支，从 `develop` 创建，用于准备发布
+- `hotfix/*`: 热修复分支，从 `main` 创建，修复后合并到 `main` 和 `develop`
+
+### 分支命名规范
+
+```
+feature/user-authentication     # 功能分支
+release/v1.2.0                  # 发布分支
+hotfix/critical-security-fix    # 热修复分支
+```
+
+## **提交信息规范**
+
+### 提交信息格式
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+### 类型（Type）
+
+- `feat`: 新功能
+- `fix`: 修复 bug
+- `docs`: 文档更新
+- `style`: 代码格式调整
+- `refactor`: 代码重构
+- `test`: 测试相关
+- `chore`: 构建过程或辅助工具的变动
+
+### 作用域（Scope）
+
+- `auth`: 认证相关
+- `user`: 用户管理
+- `api`: API 接口
+- `db`: 数据库相关
+- `config`: 配置相关
+- `test`: 测试相关
+
+### 示例
+
+```
+feat(auth): add JWT token refresh functionality
+
+- Implement refresh token generation
+- Add token validation middleware
+- Update authentication service
+
+Closes #123
+```
+
+## **代码审查规范**
+
+### 审查要点
+
+1. **功能正确性**: 代码是否实现了预期功能
+2. **代码质量**: 是否符合项目编码规范
+3. **测试覆盖**: 是否有足够的测试用例
+4. **文档更新**: 是否需要更新相关文档
+5. **性能影响**: 是否对系统性能有负面影响
+6. **安全性**: 是否存在安全漏洞
+
+### 审查流程
+
+1. 创建 Pull Request
+2. 自动检查（CI/CD）
+3. 代码审查
+4. 批准合并
+5. 删除功能分支
+
+## **版本管理规范**
+
+### 语义化版本控制
+
+```
+MAJOR.MINOR.PATCH
+```
+
+- `MAJOR`: 不兼容的 API 修改
+- `MINOR`: 向下兼容的功能性新增
+- `PATCH`: 向下兼容的问题修正
+
+### 版本标签
+
+```
+v1.2.3
+```
+
+### 发布流程
+
+1. 从 `develop` 创建 `release/v1.2.0` 分支
+2. 修复发布相关问题
+3. 更新版本号和更新日志
+4. 合并到 `main` 和 `develop`
+5. 创建版本标签
+
+## **冲突解决策略**
+
+### 合并冲突处理
+
+1. 优先使用 `git merge` 进行合并
+2. 复杂冲突使用 `git rebase` 保持提交历史清晰
+3. 冲突解决后必须进行测试验证
+
+### 冲突预防
+
+1. 及时同步主分支代码
+2. 避免多人同时修改同一文件
+3. 使用明确的职责分工
+
+## **Git Hooks 配置**
+
+### 预提交检查
+
+- 代码格式检查
+- 单元测试执行
+- 代码质量检查
+
+### 提交信息检查
+
+- 提交信息格式验证
+- 类型和作用域验证
+
+### 推送前检查
+
+- 集成测试执行
+- 构建验证
+  description:
+  globs:
+  alwaysApply: true
+
+---

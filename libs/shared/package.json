@@ -1,0 +1,49 @@
+{
+  "name": "@hl8-aio-saas-practice/shared",
+  "version": "0.0.1",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ],
+  "nx": {
+    "name": "shared",
+    "tags": [
+      "scope:shared",
+      "type:library"
+    ],
+    "targets": {
+      "build": {
+        "executor": "@nx/js:tsc",
+        "outputs": [
+          "{options.outputPath}"
+        ],
+        "options": {
+          "outputPath": "dist/libs/shared",
+          "tsConfig": "libs/shared/tsconfig.lib.json",
+          "packageJson": "libs/shared/package.json",
+          "main": "libs/shared/src/index.ts",
+          "assets": [
+            "libs/shared/*.md"
+          ]
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/testing": "^11.0.0",
+    "tslib": "^2.3.0"
+  }
+}

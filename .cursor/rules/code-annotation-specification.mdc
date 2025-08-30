@@ -1,0 +1,393 @@
+---
+description: 代码注释规则
+globs:
+alwaysApply: true
+---
+
+# 代码注释规范（Code Annotation Specification）
+
+**遵循代码即文档的思想，应当保证代码与注释的一致性和规范性。**
+
+## **代码注释规则**
+
+- 本项目代码应当按照 TSDoc 规范添加注释。主要代码应当写入代码的原理与机制，功能与职责。修改代码时应当同时修改相应的注释，确保代码与注释一致。
+- 所有公共 API、类、方法、接口、枚举等都必须添加完整的 TSDoc 注释。
+- 注释应当清晰、准确、完整，避免冗余和过时的信息。
+- 使用中文进行注释，确保团队理解的一致性。
+
+## **TSDoc 注释结构**
+
+### 基本结构
+
+```typescript
+/**
+ * @description 功能描述
+ * @param {Type} paramName 参数描述
+ * @returns {Type} 返回值描述
+ * @throws {ErrorType} 异常描述
+ * @example 使用示例
+ */
+```
+
+### 详细结构
+
+````typescript
+/**
+ * @function functionName
+ * @description
+ * 详细的功能描述，包含：
+ * 1. 主要功能说明
+ * 2. 使用场景
+ * 3. 注意事项
+ *
+ * 原理与机制：
+ * 1. 实现原理说明
+ * 2. 技术选型理由
+ * 3. 性能考虑
+ *
+ * 功能与职责：
+ * 1. 核心职责
+ * 2. 边界条件
+ * 3. 依赖关系
+ *
+ * @param {Type} paramName 参数详细描述
+ * @param {Type} [optionalParam] 可选参数描述
+ * @returns {Type} 返回值详细描述
+ * @throws {ErrorType} 可能抛出的异常及条件
+ * @example
+ * ```typescript
+ * const result = functionName(param1, param2);
+ * console.log(result);
+ * ```
+ * @since 1.0.0
+ * @deprecated 如果已废弃，说明替代方案
+ */
+````
+
+````ts
+import { NestFactory } from '@nestjs/core';
+import {
+  FastifyAdapter,
+  NestFastifyApplication,
+} from '@nestjs/platform-fastify';
+import { AppModule } from './app.module';
+
+/**
+ * @function bootstrap
+ * @description
+ * 启动NestJS应用的主函数。该函数负责创建基于Fastify平台的应用实例，
+ * 并监听指定端口启动高性能HTTP服务。
+ *
+ * 原理与机制：
+ * 1. 通过NestFactory.create创建应用实例，使用FastifyAdapter作为HTTP适配器，
+ *    Fastify是一个高性能的Node.js web框架，相比Express具有更好的性能表现。
+ * 2. FastifyAdapter提供了Fastify与NestJS的集成，使得NestJS可以充分利用Fastify的高性能特性，如更快的路由匹配、更低的延迟等。
+ * 3. 最后通过listen方法监听环境变量PORT指定的端口（默认3000），启动HTTP服务。
+ *
+ * 功能与职责：
+ * 1. 启动应用服务器
+ * 2. 配置全局中间件和管道
+ * 3. 初始化数据库连接
+ * 4. 启动事件监听器
+ *
+ * @returns {Promise<void>} 返回一个Promise，表示应用启动过程
+ * @throws {Error} 当端口被占用或配置错误时抛出异常
+ * @example
+ * ```typescript
+ * // 启动应用
+ * bootstrap().catch(error => {
+ *   console.error('Failed to start application:', error);
+ *   process.exit(1);
+ * });
+ * ```
+ * @since 1.0.0
+ */
+async function bootstrap() {
+  // 创建基于Fastify的Nest应用实例
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter()
+  );
+
+  // 启动HTTP服务，监听指定端口
+  await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
+}
+
+// 启动应用
+bootstrap();
+````
+
+## **分层架构注释规范**
+
+本项目按照整洁架构（Clean Architecture）原则组织代码，每个功能组件都应当按照其所在层（Layer）和组件实际承担的职责增加相应的注释。
+
+### 领域层（Domain Layer）注释规范
+
+领域层组件应当重点说明业务规则、领域概念和实体关系。例如，领域层的实体组件应参考如下注释示例：
+
+````
+/**
+ * @class User
+ * @description
+ * 用户领域实体，代表系统中的用户对象，包含用户的核心属性和行为。
+ *
+ * 原理与机制：
+ * 1. 作为领域层的实体，User聚合了与用户相关的属性（如id、name、email等）和业务方法（如修改邮箱、激活账户等）。
+ * 2. 实体的唯一性由id属性保证，所有与用户相关的业务规则应在该实体内实现，确保领域一致性。
+ * 3. 领域实体不依赖于基础设施和外部服务，仅关注业务规则和状态变更。
+ * 4. 使用值对象封装复杂属性，确保领域概念的完整性。
+ *
+ * 功能与职责：
+ * 1. 表达用户的核心业务属性和行为
+ * 2. 封装与用户相关的业务规则
+ * 3. 保证用户实体的一致性和完整性
+ * 4. 提供领域事件发布能力
+ *
+ * @example
+ * ```typescript
+ * const user = new User('user-123', 'John Doe', 'john@example.com');
+ * user.changeEmail('newemail@example.com');
+ * user.activate();
+ * ```
+ * @since 1.0.0
+ */
+export class User {
+  /**
+   * 用户唯一标识
+   * @description 全局唯一的用户标识符，用于区分不同的用户实体
+   */
+  private readonly id: string;
+
+  /**
+   * 用户名
+   * @description 用户的显示名称，用于界面展示和用户识别
+   */
+  private name: string;
+
+  /**
+   * 用户邮箱
+   * @description 用户的电子邮箱地址，用于登录和通知
+   */
+  private email: string;
+
+  /**
+   * 构造函数，初始化用户实体
+   * @description 创建用户实体实例，设置基本属性并验证数据有效性
+   * @param {string} id 用户唯一标识，必须为非空字符串
+   * @param {string} name 用户名，长度在2-50个字符之间
+   * @param {string} email 用户邮箱，必须符合邮箱格式规范
+   * @throws {InvalidArgumentException} 当参数无效时抛出异常
+   */
+  constructor(id: string, name: string, email: string) {
+    this.id = id;
+    this.name = name;
+    this.email = email;
+  }
+
+  /**
+   * 修改用户邮箱
+   * @description 更新用户的邮箱地址，包含邮箱格式验证和重复性检查
+   * @param {string} newEmail 新的邮箱地址，必须符合邮箱格式规范
+   * @throws {InvalidEmailException} 当邮箱格式无效时抛出异常
+   * @throws {EmailAlreadyExistsException} 当邮箱已被其他用户使用时抛出异常
+   * @example
+   * ```typescript
+   * user.changeEmail('newemail@example.com');
+   * ```
+   */
+  public changeEmail(newEmail: string): void {
+    // 业务规则：邮箱格式校验等
+    this.email = newEmail;
+  }
+
+  /**
+   * 获取用户ID
+   * @description 获取用户的唯一标识符
+   * @returns {string} 用户唯一标识符
+   */
+  public getId(): string {
+    return this.id;
+  }
+
+  /**
+   * 获取用户名
+   * @description 获取用户的显示名称
+   * @returns {string} 用户名
+   */
+  public getName(): string {
+    return this.name;
+  }
+
+  /**
+   * 获取用户邮箱
+   * @description 获取用户的电子邮箱地址
+   * @returns {string} 用户邮箱地址
+   */
+  public getEmail(): string {
+    return this.email;
+  }
+}
+```
+
+### 应用层（Application Layer）注释规范
+
+应用层组件应当重点说明用例、业务流程和协调逻辑。
+
+```typescript
+/**
+ * @class CreateUserUseCase
+ * @description
+ * 创建用户的用例，负责协调用户创建的业务流程。
+ *
+ * 原理与机制：
+ * 1. 作为应用层的用例，CreateUserUseCase协调领域服务和基础设施服务。
+ * 2. 使用命令模式封装用户创建请求，确保请求的不可变性。
+ * 3. 通过领域事件实现松耦合的业务流程。
+ * 4. 使用事务确保数据一致性。
+ *
+ * 功能与职责：
+ * 1. 验证用户创建请求的有效性
+ * 2. 协调用户实体创建和持久化
+ * 3. 发送用户创建成功事件
+ * 4. 处理用户创建失败的回滚
+ *
+ * @example
+ * ```typescript
+ * const useCase = new CreateUserUseCase(userRepo, eventBus);
+ * const result = await useCase.execute({
+ *   name: 'John Doe',
+ *   email: 'john@example.com'
+ * });
+ * ```
+ * @since 1.0.0
+ */
+export class CreateUserUseCase {
+  /**
+   * 执行用户创建用例
+   * @description 创建新用户并处理相关的业务流程
+   * @param {CreateUserCommand} command 用户创建命令
+   * @returns {Promise<User>} 创建成功的用户实体
+   * @throws {ValidationException} 当命令参数无效时抛出异常
+   * @throws {UserAlreadyExistsException} 当用户已存在时抛出异常
+   */
+  async execute(command: CreateUserCommand): Promise<User> {
+    // 实现逻辑
+  }
+}
+```
+
+### 基础设施层（Infrastructure Layer）注释规范
+
+基础设施层组件应当重点说明技术实现、外部服务集成和配置管理。
+
+```typescript
+/**
+ * @class PostgresUserRepository
+ * @description
+ * PostgreSQL用户仓储实现，负责用户数据的持久化操作。
+ *
+ * 原理与机制：
+ * 1. 实现UserRepository接口，提供用户数据的CRUD操作。
+ * 2. 使用MikroORM进行对象关系映射，简化数据库操作。
+ * 3. 实现连接池管理，提高数据库访问性能。
+ * 4. 使用事务确保数据一致性。
+ *
+ * 功能与职责：
+ * 1. 用户数据的增删改查操作
+ * 2. 数据库连接管理和事务处理
+ * 3. 查询优化和性能监控
+ * 4. 数据迁移和版本管理
+ *
+ * @example
+ * ```typescript
+ * const repository = new PostgresUserRepository(em);
+ * const user = await repository.findById('user-123');
+ * ```
+ * @since 1.0.0
+ */
+export class PostgresUserRepository implements UserRepository {
+  /**
+   * 根据ID查找用户
+   * @description 通过用户ID从数据库中查找用户实体
+   * @param {string} id 用户唯一标识
+   * @returns {Promise<User | null>} 用户实体或null
+   * @throws {DatabaseConnectionException} 当数据库连接失败时抛出异常
+   */
+  async findById(id: string): Promise<User | null> {
+    // 实现逻辑
+  }
+}
+```
+
+### 表现层（Presentation Layer）注释规范
+
+表现层组件应当重点说明API接口、请求处理和响应格式。
+
+```typescript
+/**
+ * @class UserController
+ * @description
+ * 用户控制器，处理用户相关的HTTP请求和响应。
+ *
+ * 原理与机制：
+ * 1. 使用NestJS装饰器定义路由和请求方法。
+ * 2. 通过DTO验证和转换请求数据。
+ * 3. 使用拦截器处理通用逻辑如日志、缓存等。
+ * 4. 通过管道进行数据验证和转换。
+ *
+ * 功能与职责：
+ * 1. 接收和验证HTTP请求
+ * 2. 调用应用层用例处理业务逻辑
+ * 3. 格式化HTTP响应
+ * 4. 处理异常和错误响应
+ *
+ * @example
+ * ```typescript
+ * // POST /users
+ * const user = await userController.create(createUserDto);
+ * ```
+ * @since 1.0.0
+ */
+@Controller('users')
+export class UserController {
+  /**
+   * 创建用户
+   * @description 创建新用户的API接口
+   * @param {CreateUserDto} createUserDto 用户创建数据传输对象
+   * @returns {Promise<UserResponseDto>} 创建成功的用户信息
+   * @throws {BadRequestException} 当请求参数无效时抛出异常
+   * @throws {ConflictException} 当用户已存在时抛出异常
+   */
+  @Post()
+  @UseGuards(AuthGuard)
+  async create(@Body() createUserDto: CreateUserDto): Promise<UserResponseDto> {
+    // 实现逻辑
+  }
+}
+```
+
+## **注释质量检查清单**
+
+### 必需检查项
+- [ ] 所有公共API都有完整的TSDoc注释
+- [ ] 注释包含@description、@param、@returns等必要标签
+- [ ] 注释内容准确反映代码的实际功能
+- [ ] 注释使用中文，确保团队理解一致性
+- [ ] 注释包含原理与机制说明
+- [ ] 注释包含功能与职责说明
+
+### 推荐检查项
+- [ ] 注释包含@example使用示例
+- [ ] 注释包含@throws异常说明
+- [ ] 注释包含@since版本信息
+- [ ] 注释包含@deprecated废弃说明（如适用）
+- [ ] 注释包含性能考虑和限制说明
+- [ ] 注释包含依赖关系和约束条件
+
+### 注释维护原则
+1. **及时更新**: 代码修改时必须同步更新注释
+2. **保持简洁**: 注释应当简洁明了，避免冗余
+3. **突出重点**: 重点说明复杂逻辑和业务规则
+4. **保持一致性**: 使用统一的注释风格和术语
+5. **定期审查**: 定期审查注释的准确性和完整性`
+````

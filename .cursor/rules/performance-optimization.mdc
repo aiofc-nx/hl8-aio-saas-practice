@@ -1,0 +1,534 @@
+---
+description: 性能优化规范
+globs:
+alwaysApply: false
+---
+
+# 性能优化规范（Performance Optimization Specification）
+
+**遵循性能优化最佳实践，确保系统的高性能和可扩展性。**
+
+## **数据库性能优化**
+
+### 查询优化
+
+```typescript
+/**
+ * @method optimizeUserQuery
+ * @description 优化用户查询
+ */
+async findUsersWithOptimization(filters: UserFilters): Promise<User[]> {
+  // 使用索引优化查询
+  const query = this.userRepository
+    .createQueryBuilder('user')
+    .leftJoinAndSelect('user.profile', 'profile')
+    .leftJoinAndSelect('user.roles', 'roles')
+    .where('user.isActive = :isActive', { isActive: true });
+
+  // 添加分页
+  if (filters.page && filters.limit) {
+    query
+      .skip((filters.page - 1) * filters.limit)
+      .take(filters.limit);
+  }
+
+  // 添加排序
+  if (filters.sortBy) {
+    query.orderBy(`user.${filters.sortBy}`, filters.sortOrder || 'ASC');
+  }
+
+  return query.getMany();
+}
+```
+
+### 连接池管理
+
+```typescript
+/**
+ * @class DatabaseConnectionPool
+ * @description 数据库连接池管理
+ */
+@Injectable()
+export class DatabaseConnectionPool {
+  private readonly pool: Pool;
+
+  constructor(private readonly config: DatabaseConfig) {
+    this.pool = new Pool({
+      host: config.host,
+      port: config.port,
+      database: config.database,
+      user: config.username,
+      password: config.password,
+      max: 20, // 最大连接数
+      min: 2, // 最小连接数
+      idleTimeoutMillis: 30000, // 空闲超时
+      connectionTimeoutMillis: 2000, // 连接超时
+    });
+  }
+
+  /**
+   * @method getConnection
+   * @description 获取数据库连接
+   */
+  async getConnection(): Promise<PoolClient> {
+    return this.pool.connect();
+  }
+
+  /**
+   * @method executeQuery
+   * @description 执行查询
+   */
+  async executeQuery<T>(query: string, params: any[] = []): Promise<T[]> {
+    const client = await this.getConnection();
+    try {
+      const result = await client.query(query, params);
+      return result.rows;
+    } finally {
+      client.release();
+    }
+  }
+}
+```
+
+## **缓存策略**
+
+### 多级缓存
+
+```typescript
+/**
+ * @class MultiLevelCache
+ * @description 多级缓存实现
+ */
+@Injectable()
+export class MultiLevelCache {
+  constructor(
+    private readonly memoryCache: MemoryCacheService,
+    private readonly redisCache: RedisCacheService,
+    private readonly logger: PinoLoggerService
+  ) {}
+
+  /**
+   * @method get
+   * @description 多级缓存获取
+   */
+  async get<T>(key: string): Promise<T | null> {
+    // 第一级：内存缓存
+    let value = await this.memoryCache.get<T>(key);
+    if (value !== null) {
+      this.logger.debug(`Memory cache hit: ${key}`, LogContext.CACHE);
+      return value;
+    }
+
+    // 第二级：Redis缓存
+    value = await this.redisCache.get<T>(key);
+    if (value !== null) {
+      // 回填内存缓存
+      await this.memoryCache.set(key, value, { ttl: 300 }); // 5分钟
+      this.logger.debug(`Redis cache hit: ${key}`, LogContext.CACHE);
+      return value;
+    }
+
+    this.logger.debug(`Cache miss: ${key}`, LogContext.CACHE);
+    return null;
+  }
+
+  /**
+   * @method set
+   * @description 多级缓存设置
+   */
+  async set<T>(key: string, value: T, options?: CacheOptions): Promise<void> {
+    const promises = [
+      this.memoryCache.set(key, value, { ttl: 300, ...options }),
+      this.redisCache.set(key, value, options),
+    ];
+
+    await Promise.all(promises);
+    this.logger.debug(`Cache set: ${key}`, LogContext.CACHE);
+  }
+}
+```
+
+### 缓存预热
+
+```typescript
+/**
+ * @class CacheWarmupService
+ * @description 缓存预热服务
+ */
+@Injectable()
+export class CacheWarmupService {
+  constructor(
+    private readonly cache: MultiLevelCache,
+    private readonly userService: UserService,
+    private readonly logger: PinoLoggerService
+  ) {}
+
+  /**
+   * @method warmupUserCache
+   * @description 预热用户缓存
+   */
+  async warmupUserCache(): Promise<void> {
+    this.logger.info('Starting user cache warmup', LogContext.CACHE);
+
+    const users = await this.userService.findActiveUsers();
+
+    const warmupPromises = users.map((user) =>
+      this.cache.set(`user:${user.id}`, user, { ttl: 3600 })
+    );
+
+    await Promise.all(warmupPromises);
+
+    this.logger.info(
+      `User cache warmup completed: ${users.length} users`,
+      LogContext.CACHE
+    );
+  }
+}
+```
+
+## **异步处理优化**
+
+### 任务队列
+
+```typescript
+/**
+ * @class TaskQueue
+ * @description 任务队列管理
+ */
+@Injectable()
+export class TaskQueue {
+  private readonly queue = new Queue('default', {
+    redis: {
+      host: 'localhost',
+      port: 6379,
+    },
+    defaultJobOptions: {
+      removeOnComplete: 100,
+      removeOnFail: 50,
+    },
+  });
+
+  /**
+   * @method addTask
+   * @description 添加任务到队列
+   */
+  async addTask<T>(
+    name: string,
+    data: T,
+    options?: JobOptions
+  ): Promise<Job<T>> {
+    return this.queue.add(name, data, {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 2000,
+      },
+      ...options,
+    });
+  }
+
+  /**
+   * @method processTask
+   * @description 处理任务
+   */
+  async processTask<T>(
+    name: string,
+    processor: (job: Job<T>) => Promise<void>
+  ): Promise<void> {
+    this.queue.process(name, async (job) => {
+      try {
+        await processor(job);
+      } catch (error) {
+        this.logger.error(
+          `Task processing failed: ${name}`,
+          LogContext.TASK_QUEUE,
+          { jobId: job.id, error: (error as Error).message },
+          error as Error
+        );
+        throw error;
+      }
+    });
+  }
+}
+```
+
+### 批量处理
+
+```typescript
+/**
+ * @class BatchProcessor
+ * @description 批量处理器
+ */
+@Injectable()
+export class BatchProcessor {
+  /**
+   * @method processBatch
+   * @description 批量处理数据
+   */
+  async processBatch<T, R>(
+    items: T[],
+    processor: (item: T) => Promise<R>,
+    batchSize: number = 100
+  ): Promise<R[]> {
+    const results: R[] = [];
+
+    for (let i = 0; i < items.length; i += batchSize) {
+      const batch = items.slice(i, i + batchSize);
+      const batchPromises = batch.map(processor);
+
+      const batchResults = await Promise.all(batchPromises);
+      results.push(...batchResults);
+
+      this.logger.debug(
+        `Batch processed: ${i + batch.length}/${items.length}`,
+        LogContext.BATCH_PROCESSOR
+      );
+    }
+
+    return results;
+  }
+}
+```
+
+## **API 性能优化**
+
+### 响应压缩
+
+```typescript
+/**
+ * @class CompressionMiddleware
+ * @description 响应压缩中间件
+ */
+@Injectable()
+export class CompressionMiddleware implements NestMiddleware {
+  use(req: Request, res: Response, next: NextFunction) {
+    const acceptEncoding = req.headers['accept-encoding'];
+
+    if (acceptEncoding?.includes('gzip')) {
+      res.setHeader('Content-Encoding', 'gzip');
+      // 使用 gzip 压缩响应
+    } else if (acceptEncoding?.includes('deflate')) {
+      res.setHeader('Content-Encoding', 'deflate');
+      // 使用 deflate 压缩响应
+    }
+
+    next();
+  }
+}
+```
+
+### 分页优化
+
+```typescript
+/**
+ * @interface PaginationOptions
+ * @description 分页选项
+ */
+export interface PaginationOptions {
+  page: number;
+  limit: number;
+  sortBy?: string;
+  sortOrder?: 'ASC' | 'DESC';
+}
+
+/**
+ * @class PaginationService
+ * @description 分页服务
+ */
+@Injectable()
+export class PaginationService {
+  /**
+   * @method createPagination
+   * @description 创建分页查询
+   */
+  createPagination<T>(
+    queryBuilder: SelectQueryBuilder<T>,
+    options: PaginationOptions
+  ): SelectQueryBuilder<T> {
+    const { page, limit, sortBy, sortOrder } = options;
+
+    // 添加排序
+    if (sortBy) {
+      queryBuilder.orderBy(sortBy, sortOrder || 'ASC');
+    }
+
+    // 添加分页
+    const offset = (page - 1) * limit;
+    queryBuilder.offset(offset).limit(limit);
+
+    return queryBuilder;
+  }
+
+  /**
+   * @method createPaginationResponse
+   * @description 创建分页响应
+   */
+  createPaginationResponse<T>(
+    data: T[],
+    total: number,
+    options: PaginationOptions
+  ) {
+    const { page, limit } = options;
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+    };
+  }
+}
+```
+
+## **内存管理**
+
+### 内存泄漏检测
+
+```typescript
+/**
+ * @class MemoryMonitor
+ * @description 内存监控器
+ */
+@Injectable()
+export class MemoryMonitor {
+  private readonly logger: PinoLoggerService;
+
+  constructor(logger: PinoLoggerService) {
+    this.logger = logger;
+    this.startMonitoring();
+  }
+
+  /**
+   * @method startMonitoring
+   * @description 开始内存监控
+   */
+  private startMonitoring(): void {
+    setInterval(() => {
+      const usage = process.memoryUsage();
+
+      this.logger.debug('Memory usage', LogContext.SYSTEM, {
+        rss: this.formatBytes(usage.rss),
+        heapTotal: this.formatBytes(usage.heapTotal),
+        heapUsed: this.formatBytes(usage.heapUsed),
+        external: this.formatBytes(usage.external),
+      });
+
+      // 内存使用率超过80%时告警
+      const heapUsagePercent = (usage.heapUsed / usage.heapTotal) * 100;
+      if (heapUsagePercent > 80) {
+        this.logger.warn('High memory usage detected', LogContext.SYSTEM, {
+          heapUsagePercent: heapUsagePercent.toFixed(2),
+        });
+      }
+    }, 60000); // 每分钟检查一次
+  }
+
+  /**
+   * @method formatBytes
+   * @description 格式化字节数
+   */
+  private formatBytes(bytes: number): string {
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    if (bytes === 0) return '0 Bytes';
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i];
+  }
+}
+```
+
+## **性能监控**
+
+### 性能指标收集
+
+```typescript
+/**
+ * @class PerformanceMonitor
+ * @description 性能监控器
+ */
+@Injectable()
+export class PerformanceMonitor {
+  /**
+   * @method measureExecutionTime
+   * @description 测量执行时间
+   */
+  async measureExecutionTime<T>(
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    const startTime = process.hrtime.bigint();
+
+    try {
+      const result = await operation();
+      const endTime = process.hrtime.bigint();
+      const duration = Number(endTime - startTime) / 1000000; // 转换为毫秒
+
+      this.logger.debug(
+        `Operation completed: ${operationName}`,
+        LogContext.PERFORMANCE,
+        { duration: `${duration.toFixed(2)}ms` }
+      );
+
+      return result;
+    } catch (error) {
+      const endTime = process.hrtime.bigint();
+      const duration = Number(endTime - startTime) / 1000000;
+
+      this.logger.error(
+        `Operation failed: ${operationName}`,
+        LogContext.PERFORMANCE,
+        { duration: `${duration.toFixed(2)}ms` },
+        error as Error
+      );
+
+      throw error;
+    }
+  }
+}
+```
+
+## **最佳实践**
+
+### 1. 数据库优化
+
+- 使用适当的索引
+- 避免 N+1 查询问题
+- 使用连接池管理连接
+- 定期分析慢查询
+
+### 2. 缓存策略
+
+- 实现多级缓存
+- 合理设置缓存过期时间
+- 使用缓存预热
+- 监控缓存命中率
+
+### 3. 异步处理
+
+- 使用任务队列处理耗时操作
+- 实现批量处理减少数据库访问
+- 使用流式处理处理大量数据
+
+### 4. API 优化
+
+- 实现响应压缩
+- 使用分页减少数据传输
+- 实现数据懒加载
+- 使用 GraphQL 优化查询
+
+### 5. 监控和告警
+
+- 监控关键性能指标
+- 设置合理的告警阈值
+- 定期进行性能分析
+- 建立性能基准
+  description:
+  globs:
+  alwaysApply: true
+
+---

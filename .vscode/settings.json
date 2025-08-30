@@ -1,3 +1,25 @@
 {
-    "nxConsole.generateAiAgentRules": true
+    "nxConsole.generateAiAgentRules": true,
+    "editor.formatOnSave": true,
+  "editor.formatOnPaste": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "prettier.requireConfig": true,
+  "prettier.useEditorConfig": true,
+  "typescript.preferences.importModuleSpecifier": "relative",
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact"
+  ],
+  "eslint.format.enable": true,
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "files.eol": "\n",
+  "files.autoSave": "onFocusChange",
+  "editor.bracketPairColorization.enabled": true,
+  "editor.renderWhitespace": "boundary",
+  "editor.rulers": [80],
+  "editor.wordWrap": "bounded",
+  "editor.wordWrapColumn": 80
 }

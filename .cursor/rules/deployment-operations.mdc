@@ -1,0 +1,619 @@
+---
+description: 部署和运维规范
+globs:
+alwaysApply: false
+---
+
+# 部署和运维规范（Deployment and Operations Specification）
+
+**遵循 DevOps 最佳实践，确保系统的可靠部署和高效运维。**
+
+## **容器化部署**
+
+### Dockerfile 规范
+
+```dockerfile
+# 多阶段构建
+FROM node:18-alpine AS builder
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制 package 文件
+COPY package*.json ./
+COPY pnpm-lock.yaml ./
+
+# 安装依赖
+RUN npm install -g pnpm
+RUN pnpm install --frozen-lockfile
+
+# 复制源代码
+COPY . .
+
+# 构建应用
+RUN pnpm nx build api --prod
+
+# 生产阶段
+FROM node:18-alpine AS production
+
+# 创建非 root 用户
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nestjs -u 1001
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制构建产物
+COPY --from=builder --chown=nestjs:nodejs /app/dist/apps/api ./
+COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
+
+# 切换到非 root 用户
+USER nestjs
+
+# 暴露端口
+EXPOSE 3000
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+
+# 启动应用
+CMD ["node", "main.js"]
+```
+
+### Docker Compose 配置
+
+```yaml
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://user:password@postgres:5432/db
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=db
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+```
+
+## **Kubernetes 部署**
+
+### Deployment 配置
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hl8-api
+  labels:
+    app: hl8-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hl8-api
+  template:
+    metadata:
+      labels:
+        app: hl8-api
+    spec:
+      containers:
+        - name: api
+          image: hl8/api:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: 'production'
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: url
+          resources:
+            requests:
+              memory: '256Mi'
+              cpu: '250m'
+            limits:
+              memory: '512Mi'
+              cpu: '500m'
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+```
+
+### Service 配置
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: hl8-api-service
+spec:
+  selector:
+    app: hl8-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
+```
+
+### Ingress 配置
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hl8-api-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    cert-manager.io/cluster-issuer: 'letsencrypt-prod'
+spec:
+  tls:
+    - hosts:
+        - api.example.com
+      secretName: api-tls
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hl8-api-service
+                port:
+                  number: 80
+```
+
+## **CI/CD 流水线**
+
+### GitHub Actions 配置
+
+```yaml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run linting
+        run: pnpm nx lint
+
+      - name: Run tests
+        run: pnpm nx test
+
+      - name: Run e2e tests
+        run: pnpm nx e2e
+
+      - name: Build application
+        run: pnpm nx build api --prod
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run security scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [test, security-scan]
+    if: github.ref == 'refs/heads/develop'
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t hl8/api:staging .
+          docker push hl8/api:staging
+
+      - name: Deploy to staging
+        run: |
+          kubectl set image deployment/hl8-api api=hl8/api:staging -n staging
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [test, security-scan]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t hl8/api:latest .
+          docker push hl8/api:latest
+
+      - name: Deploy to production
+        run: |
+          kubectl set image deployment/hl8-api api=hl8/api:latest -n production
+```
+
+## **监控和日志**
+
+### 应用监控
+
+```typescript
+/**
+ * @class ApplicationMonitor
+ * @description 应用监控服务
+ */
+@Injectable()
+export class ApplicationMonitor {
+  constructor(
+    private readonly logger: PinoLoggerService,
+    private readonly metricsService: MetricsService
+  ) {}
+
+  /**
+   * @method startMonitoring
+   * @description 启动应用监控
+   */
+  startMonitoring(): void {
+    // 监控内存使用
+    setInterval(() => {
+      const usage = process.memoryUsage();
+      this.metricsService.gauge('memory.heap_used', usage.heapUsed);
+      this.metricsService.gauge('memory.heap_total', usage.heapTotal);
+      this.metricsService.gauge('memory.rss', usage.rss);
+    }, 30000);
+
+    // 监控事件循环延迟
+    setInterval(() => {
+      const start = process.hrtime.bigint();
+      setImmediate(() => {
+        const end = process.hrtime.bigint();
+        const delay = Number(end - start) / 1000000; // 转换为毫秒
+        this.metricsService.histogram('eventloop.delay', delay);
+      });
+    }, 1000);
+
+    // 监控活跃连接数
+    setInterval(() => {
+      const activeConnections = this.getActiveConnections();
+      this.metricsService.gauge('connections.active', activeConnections);
+    }, 5000);
+  }
+
+  /**
+   * @method getHealthStatus
+   * @description 获取健康状态
+   */
+  getHealthStatus(): HealthStatus {
+    const usage = process.memoryUsage();
+    const heapUsagePercent = (usage.heapUsed / usage.heapTotal) * 100;
+
+    return {
+      status: heapUsagePercent < 90 ? 'healthy' : 'unhealthy',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      memory: {
+        heapUsed: usage.heapUsed,
+        heapTotal: usage.heapTotal,
+        heapUsagePercent,
+      },
+      version: process.env.npm_package_version || 'unknown',
+    };
+  }
+}
+```
+
+### 日志聚合
+
+```typescript
+/**
+ * @class LogAggregator
+ * @description 日志聚合服务
+ */
+@Injectable()
+export class LogAggregator {
+  constructor(
+    private readonly logger: PinoLoggerService,
+    private readonly elasticsearchService: ElasticsearchService
+  ) {}
+
+  /**
+   * @method sendLogsToElasticsearch
+   * @description 发送日志到 Elasticsearch
+   */
+  async sendLogsToElasticsearch(logs: LogEntry[]): Promise<void> {
+    const bulkBody = logs.flatMap((log) => [
+      { index: { _index: 'application-logs' } },
+      {
+        timestamp: log.timestamp,
+        level: log.level,
+        message: log.message,
+        context: log.context,
+        metadata: log.metadata,
+        service: 'hl8-api',
+        environment: process.env.NODE_ENV,
+      },
+    ]);
+
+    try {
+      await this.elasticsearchService.bulk({ body: bulkBody });
+    } catch (error) {
+      this.logger.error(
+        'Failed to send logs to Elasticsearch',
+        LogContext.LOGGING,
+        { error: (error as Error).message },
+        error as Error
+      );
+    }
+  }
+}
+```
+
+## **备份和恢复**
+
+### 数据库备份
+
+```typescript
+/**
+ * @class DatabaseBackupService
+ * @description 数据库备份服务
+ */
+@Injectable()
+export class DatabaseBackupService {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly logger: PinoLoggerService
+  ) {}
+
+  /**
+   * @method createBackup
+   * @description 创建数据库备份
+   */
+  async createBackup(): Promise<string> {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = `/backups/db-backup-${timestamp}.sql`;
+
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+
+    try {
+      const dbConfig = this.configService.get('database');
+      const command = `PGPASSWORD=${dbConfig.password} pg_dump -h ${dbConfig.host} -U ${dbConfig.username} -d ${dbConfig.database} -f ${backupPath}`;
+
+      await execAsync(command);
+
+      this.logger.info(
+        'Database backup created successfully',
+        LogContext.BACKUP,
+        { backupPath }
+      );
+
+      return backupPath;
+    } catch (error) {
+      this.logger.error(
+        'Database backup failed',
+        LogContext.BACKUP,
+        { error: (error as Error).message },
+        error as Error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * @method restoreBackup
+   * @description 恢复数据库备份
+   */
+  async restoreBackup(backupPath: string): Promise<void> {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+
+    try {
+      const dbConfig = this.configService.get('database');
+      const command = `PGPASSWORD=${dbConfig.password} psql -h ${dbConfig.host} -U ${dbConfig.username} -d ${dbConfig.database} -f ${backupPath}`;
+
+      await execAsync(command);
+
+      this.logger.info(
+        'Database backup restored successfully',
+        LogContext.BACKUP,
+        { backupPath }
+      );
+    } catch (error) {
+      this.logger.error(
+        'Database backup restoration failed',
+        LogContext.BACKUP,
+        { error: (error as Error).message },
+        error as Error
+      );
+      throw error;
+    }
+  }
+}
+```
+
+## **环境管理**
+
+### 环境配置
+
+```typescript
+/**
+ * @class EnvironmentManager
+ * @description 环境管理器
+ */
+@Injectable()
+export class EnvironmentManager {
+  /**
+   * @method validateEnvironment
+   * @description 验证环境配置
+   */
+  validateEnvironment(): EnvironmentValidationResult {
+    const requiredVars = [
+      'DATABASE_URL',
+      'REDIS_URL',
+      'JWT_SECRET',
+      'NODE_ENV',
+    ];
+
+    const missingVars: string[] = [];
+    const invalidVars: string[] = [];
+
+    requiredVars.forEach((varName) => {
+      const value = process.env[varName];
+      if (!value) {
+        missingVars.push(varName);
+      } else if (this.isInvalidValue(varName, value)) {
+        invalidVars.push(varName);
+      }
+    });
+
+    return {
+      isValid: missingVars.length === 0 && invalidVars.length === 0,
+      missingVars,
+      invalidVars,
+    };
+  }
+
+  /**
+   * @method isInvalidValue
+   * @description 检查环境变量值是否无效
+   */
+  private isInvalidValue(varName: string, value: string): boolean {
+    switch (varName) {
+      case 'NODE_ENV':
+        return !['development', 'staging', 'production'].includes(value);
+      case 'DATABASE_URL':
+        return !value.startsWith('postgresql://');
+      case 'REDIS_URL':
+        return !value.startsWith('redis://');
+      default:
+        return false;
+    }
+  }
+}
+```
+
+## **最佳实践**
+
+### 1. 部署策略
+
+- 使用蓝绿部署或金丝雀部署
+- 实现自动回滚机制
+- 使用健康检查确保服务可用性
+- 实现零停机部署
+
+### 2. 监控策略
+
+- 监控关键业务指标
+- 设置合理的告警阈值
+- 实现分布式追踪
+- 建立性能基准
+
+### 3. 备份策略
+
+- 定期备份数据库
+- 测试备份恢复流程
+- 实现增量备份
+- 异地备份存储
+
+### 4. 安全策略
+
+- 使用密钥管理服务
+- 实现网络隔离
+- 定期安全扫描
+- 访问控制审计
+
+### 5. 扩展策略
+
+- 水平扩展设计
+- 负载均衡配置
+- 自动扩缩容
+- 资源优化
+  description:
+  globs:
+  alwaysApply: true
+
+---

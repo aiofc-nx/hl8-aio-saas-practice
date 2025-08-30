@@ -2,6 +2,20 @@
   "recommendations": [
     "nrwl.angular-console",
     "esbenp.prettier-vscode",
-    "firsttris.vscode-jest-runner"
+    "firsttris.vscode-jest-runner",
+    "imgildev.vscode-auto-barrel",
+    "unifiedjs.vscode-mdx",
+    "jmkrivocapich.drawfolderstructure",
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "ms-vscode.vscode-typescript-next",
+    "bradlc.vscode-tailwindcss",
+    "formulahendry.auto-rename-tag",
+    "christian-kohler.path-intellisense",
+    "ms-vscode.vscode-json",
+    "redhat.vscode-yaml",
+    "ms-vscode.vscode-markdown",
+    "ms-vscode.vscode-docker",
+    "ms-azuretools.vscode-docker"
   ]
 }

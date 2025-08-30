@@ -4,7 +4,25 @@
   "files": [],
   "references": [
     {
-      "path": "./apps/iam"
+      "path": "./apps/iam-api"
+    },
+    {
+      "path": "./libs/logging"
+    },
+    {
+      "path": "./libs/shared"
+    },
+    {
+      "path": "./libs/config"
+    },
+    {
+      "path": "./libs/cache"
+    },
+    {
+      "path": "./libs/database"
+    },
+    {
+      "path": "./libs/security"
     }
   ]
 }

@@ -1,0 +1,501 @@
+---
+description: 系统架构与代码组织架构
+globs:
+alwaysApply: true
+---
+
+# 系统架构与代码组织架构原则
+
+本项目的目标是开发一个企业级的 SAAS 平台，遵循整洁架构（Clean Architecture）和领域驱动设计（DDD）的思想和原则。
+项目采用混合架构，技术栈包括：Clean Architecture + RESTful API + Event Sourcing + CQRS + 多数据库支持
+
+## 🏗️ 整体架构模式
+
+### SaaS 平台架构特征
+
+```
+HL8 SaaS 平台
+├── 多租户（下设组织及部门）架构 (Multi-Tenant)
+│   ├── 多层级隔离策略
+│   ├── 数据隔离机制
+│   ├── 资源配额管理
+│   └── 计费与订阅管理
+├── 单体应用架构优先+兼容微服务架构 (Microservices)
+│   ├── 服务拆分策略（模块化独立依赖包）
+│   ├── 单体应用服务集成策略
+├── 事件驱动架构 (Event-Driven)
+│   ├── 事件溯源 (Event Sourcing)
+│   ├── 事件总线 (Event Bus)
+│   ├── 异步处理机制
+│   └── 最终一致性保证
+└── 云原生架构 (Cloud-Native)
+    ├── 容器化部署
+    ├── 弹性伸缩
+    └── 可观测性
+```
+
+### Clean Architecture 分层设计
+
+```
+Clean Architecture 四层架构
+┌─────────────────────────────────────┐
+│     Presentation Layer (表现层)      │  ← REST API、GraphQL、WebSocket
+├─────────────────────────────────────┤
+│     Application Layer (应用层)       │  ← Use Cases、Commands、Queries
+├─────────────────────────────────────┤
+│       Domain Layer (领域层)         │  ← Entities、Value Objects、Domain Services
+├─────────────────────────────────────┤
+│    Infrastructure Layer (基础设施层)  │  ← 数据库、缓存、消息队列、外部服务
+└─────────────────────────────────────┘
+```
+
+**各层之间依赖方向只能指向内层，外层不得依赖内层实现细节，确保系统的可维护性和可扩展性。**
+
+**各领域模块需要共享的组件我们统一抽离出来，以独立模块的形式开发，作为 shared 领域模块**
+
+### 高性能策略
+
+```
+性能优化策略
+├── 缓存策略
+│   ├── Redis多级缓存
+│   ├── 查询结果缓存
+│   ├── 权限缓存
+│   └── 会话缓存
+├── 数据库优化
+│   ├── 读写分离
+│   ├── 分库分表
+│   ├── 索引优化
+│   └── 查询优化
+├── 异步处理
+│   ├── 消息队列
+│   ├── 事件驱动
+│   ├── 后台任务
+│   └── 批量处理
+└── CDN与压缩
+    ├── 静态资源CDN
+    ├── API响应压缩
+    ├── 图片压缩
+    └── 文件压缩
+```
+
+## 🔄 开发流程与架构
+
+### CQRS + Event Sourcing 模式
+
+```typescript
+// 命令查询职责分离
+Command Side (写模型)          Query Side (读模型)
+     ↓                           ↑
+[Command] → [Handler]        [Query] → [Handler]
+     ↓                           ↑
+[Domain Model]              [Read Model]
+     ↓                           ↑
+[Event Store] ←→ [Event Bus] ←→ [Projection]
+```
+
+### 事件驱动开发流程
+
+```
+事件驱动开发流程
+1. 领域事件定义 → 2. 命令处理器 → 3. 事件发布
+                        ↓
+6. 查询处理器 ← 5. 读模型投影 ← 4. 事件处理器
+```
+
+## 🛠️ 技术架构栈
+
+### 后端技术栈
+
+```typescript
+// 核心框架与语言
+- 语言: TypeScript 5.x
+- 框架: NestJS 10.x
+- 数据库: PostgreSQL 15.x + MongoDB 7.x (多数据库支持)
+- 缓存: Redis 7.x
+- 消息队列: RabbitMQ 3.x
+- 事件存储: Apache Kafka 3.x
+
+// 认证与权限
+- 认证: Passport.js + JWT
+- 权限控制: CASL (基于能力的访问控制)
+- 多因子认证: TOTP、短信验证码
+
+// 数据层
+- ORM: MikroORM (支持PostgreSQL & MongoDB)
+- 连接池: pg-pool, mongodb connection pool
+- 数据迁移: MikroORM migrations
+- 数据同步: 事件驱动的数据同步机制
+```
+
+### 前端技术栈
+
+(待定)
+
+## **后端代码组织架构划分原则**
+
+遵循领域驱动设计（DDD）思想，代码目录架构应当首先体现领域的边界。领域模块可以包含子领域，目录以领域名称命名；若无细分子领域，则以分层名称命名;层以下以功能组件名称为命名。示例目录结构如下：
+
+```
+apps/api # api应用
+libs/shared # 共享领域模块
+libs/iam/ # 身份认证与权限管理领域模块
+├── src/
+│ ├── user/ # 用户子领域
+│ │ ├── domain/ # 领域层
+│ │ │ ├── entities/ # 实体
+│ │ │ ├── value-objects/ # 值对象
+│ │ │ ├── aggregates/ # 聚合根
+│ │ │ ├── domain-events/ # 领域事件
+│ │ │ ├── domain-services/ # 领域服务
+│ │ │ ├── repositories/ # 仓储接口
+│ │ │ ├── exceptions/ # 领域异常
+│ │ │ ├── enums/ # 枚举
+│ │ │ └── types/ # 类型定义
+│ │ ├── application/ # 应用层
+│ │ │ ├── use-cases/ # 用例
+│ │ │ ├── commands/ # 命令
+│ │ │ ├── queries/ # 查询
+│ │ │ ├── handlers/ # 命令/查询处理器
+│ │ │ │ ├── command-handlers/ # 命令处理器
+│ │ │ │ └── query-handlers/ # 查询处理器
+│ │ │ ├── event-handlers/ # 事件处理器
+│ │ │ ├── services/ # 应用服务
+│ │ │ ├── validators/ # 应用层验证器
+│ │ │ └── interfaces/ # 应用层接口
+│ │ ├── infrastructure/ # 基础设施层
+│ │ │ ├── repositories/ # 仓储实现
+│ │ │ ├── mappers/ # 映射器
+│ │ │ ├── entities/ # ORM实体
+│ │ │ ├── services/ # 基础设施服务
+│ │ │ ├── external/ # 外部服务集成
+│ │ │ ├── config/ # 配置
+│ │ │ └── migrations/ # 数据库迁移
+│ │ └── presentation/ # 表现层
+│ │ ├── controllers/ # 控制器
+│ │ ├── dtos/ # 数据传输对象
+│ │ ├── validators/ # 表现层验证器
+│ │ ├── guards/ # 权限守卫
+│ │ └── interceptors/ # 拦截器
+│ ├── role/ # 角色子领域
+│ │ ├── domain/
+│ │ │ ├── entities/
+│ │ │ ├── aggregates/
+│ │ │ ├── domain-events/
+│ │ │ └── repositories/
+│ │ ├── application/
+│ │ │ ├── use-cases/
+│ │ │ └── commands/
+│ │ ├── infrastructure/
+│ │ │ └── repositories/
+│ │ └── presentation/
+│ │ └── controllers/
+│ ├── organization/ # 组织子领域
+│ │ ├── domain/
+│ │ │ ├── entities/
+│ │ │ ├── aggregates/
+│ │ │ ├── domain-events/
+│ │ │ └── repositories/
+│ │ ├── application/
+│ │ │ └── use-cases/
+│ │ ├── infrastructure/
+│ │ │ └── repositories/
+│ │ └── presentation/
+│ │ └── controllers/
+│ ├── tenant/ # 租户子领域
+│ │ ├── domain/
+│ │ │ ├── entities/
+│ │ │ ├── aggregates/
+│ │ │ ├── domain-events/
+│ │ │ └── repositories/
+│ │ ├── application/
+│ │ │ └── use-cases/
+│ │ ├── infrastructure/
+│ │ │ └── repositories/
+│ │ └── presentation/
+│ │ └── controllers/
+│ ├── permission/ # 权限子领域
+│ │ ├── domain/
+│ │ │ ├── entities/
+│ │ │ ├── aggregates/
+│ │ │ ├── domain-events/
+│ │ │ └── repositories/
+│ │ ├── application/
+│ │ │ └── use-cases/
+│ │ ├── infrastructure/
+│ │ │ └── repositories/
+│ │ └── presentation/
+│ │ └── controllers/
+│ ├── audit/ # 审计子领域
+│ │ ├── domain/
+│ │ │ ├── entities/
+│ │ │ ├── aggregates/
+│ │ │ ├── domain-events/
+│ │ │ └── repositories/
+│ │ ├── application/
+│ │ │ └── use-cases/
+│ │ ├── infrastructure/
+│ │ │ └── repositories/
+│ │ └── presentation/
+│ │ └── controllers/
+│ ├── 📄 index.ts # 模块导出
+│ └── 📄 iam.module.ts # IAM模块
+├── 📄 package.json
+└── 📄 tsconfig.json
+```
+
+## 🧪 **测试代码组织架构**
+
+### 测试分层策略
+
+遵循 Clean Architecture 的分层原则和 Nx 的最佳实践，测试代码应当按照对应的架构层进行组织，确保测试覆盖的完整性和可维护性。
+
+```
+测试代码组织架构
+├── 单元测试 (Unit Tests) - 与被测试代码同级目录
+│   ├── domain/ # 领域层测试
+│   │   ├── entities/
+│   │   │   ├── user.entity.ts
+│   │   │   └── user.entity.spec.ts # 与实体文件同级
+│   │   ├── value-objects/
+│   │   │   ├── email.value-object.ts
+│   │   │   └── email.value-object.spec.ts # 与值对象文件同级
+│   │   ├── aggregates/
+│   │   │   ├── user.aggregate.ts
+│   │   │   └── user.aggregate.spec.ts # 与聚合根文件同级
+│   │   ├── domain-services/
+│   │   │   ├── user-domain.service.ts
+│   │   │   └── user-domain.service.spec.ts # 与领域服务文件同级
+│   │   └── domain-events/
+│   │       ├── user-created.event.ts
+│   │       └── user-created.event.spec.ts # 与事件文件同级
+│   ├── application/ # 应用层测试
+│   │   ├── use-cases/
+│   │   │   ├── create-user.usecase.ts
+│   │   │   └── create-user.usecase.spec.ts # 与用例文件同级
+│   │   ├── commands/
+│   │   │   ├── create-user.command.ts
+│   │   │   └── create-user.command.spec.ts # 与命令文件同级
+│   │   ├── queries/
+│   │   │   ├── get-user.query.ts
+│   │   │   └── get-user.query.spec.ts # 与查询文件同级
+│   │   ├── handlers/
+│   │   │   ├── command-handlers/
+│   │   │   │   ├── create-user.handler.ts
+│   │   │   │   └── create-user.handler.spec.ts # 与处理器文件同级
+│   │   │   └── query-handlers/
+│   │   │       ├── get-user.handler.ts
+│   │   │       └── get-user.handler.spec.ts # 与处理器文件同级
+│   │   ├── event-handlers/
+│   │   │   ├── user-created.handler.ts
+│   │   │   └── user-created.handler.spec.ts # 与事件处理器文件同级
+│   │   ├── services/
+│   │   │   ├── user.service.ts
+│   │   │   └── user.service.spec.ts # 与应用服务文件同级
+│   │   ├── validators/
+│   │   │   ├── create-user.validator.ts
+│   │   │   └── create-user.validator.spec.ts # 与验证器文件同级
+│   │   └── interfaces/
+│   │       ├── user.interface.ts
+│   │       └── user.interface.spec.ts # 与接口文件同级
+│   ├── infrastructure/ # 基础设施层测试
+│   │   ├── repositories/
+│   │   │   ├── user.repository.ts
+│   │   │   └── user.repository.spec.ts # 与仓储文件同级
+│   │   ├── mappers/
+│   │   │   ├── user.mapper.ts
+│   │   │   └── user.mapper.spec.ts # 与映射器文件同级
+│   │   ├── entities/
+│   │   │   ├── user.entity.ts
+│   │   │   └── user.entity.spec.ts # 与ORM实体文件同级
+│   │   ├── services/
+│   │   │   ├── email.service.ts
+│   │   │   └── email.service.spec.ts # 与基础设施服务文件同级
+│   │   ├── external/
+│   │   │   ├── payment.service.ts
+│   │   │   └── payment.service.spec.ts # 与外部服务文件同级
+│   │   ├── config/
+│   │   │   ├── database.config.ts
+│   │   │   └── database.config.spec.ts # 与配置文件同级
+│   │   └── migrations/
+│   │       ├── create-users.migration.ts
+│   │       └── create-users.migration.spec.ts # 与迁移文件同级
+│   └── presentation/ # 表现层测试
+│       ├── controllers/
+│       │   ├── user.controller.ts
+│       │   └── user.controller.spec.ts # 与控制器文件同级
+│       ├── dtos/
+│       │   ├── create-user.dto.ts
+│       │   └── create-user.dto.spec.ts # 与DTO文件同级
+│       ├── validators/
+│       │   ├── create-user.validator.ts
+│       │   └── create-user.validator.spec.ts # 与验证器文件同级
+│       ├── guards/
+│       │   ├── auth.guard.ts
+│       │   └── auth.guard.spec.ts # 与守卫文件同级
+│       └── interceptors/
+│           ├── logging.interceptor.ts
+│           └── logging.interceptor.spec.ts # 与拦截器文件同级
+├── 集成测试 (Integration Tests) - 独立目录
+│   ├── api/ # API集成测试
+│   │   ├── user-api.integration.spec.ts
+│   │   └── auth-api.integration.spec.ts
+│   ├── database/ # 数据库集成测试
+│   │   ├── user-database.integration.spec.ts
+│   │   └── transaction.integration.spec.ts
+│   ├── external-services/ # 外部服务集成测试
+│   │   ├── payment-service.integration.spec.ts
+│   │   └── email-service.integration.spec.ts
+│   └── event-sourcing/ # 事件溯源集成测试
+│       ├── user-events.integration.spec.ts
+│       └── event-store.integration.spec.ts
+├── 端到端测试 (E2E Tests) - 独立目录
+│   ├── scenarios/ # 业务场景测试
+│   │   ├── user-registration.e2e.spec.ts
+│   │   └── user-authentication.e2e.spec.ts
+│   ├── workflows/ # 工作流测试
+│   │   ├── user-onboarding.e2e.spec.ts
+│   │   └── password-reset.e2e.spec.ts
+│   └── user-journeys/ # 用户旅程测试
+│       ├── complete-user-flow.e2e.spec.ts
+│       └── admin-dashboard.e2e.spec.ts
+└── 性能测试 (Performance Tests) - 独立目录
+    ├── load/ # 负载测试
+    │   ├── user-api.load.spec.ts
+    │   └── database.load.spec.ts
+    ├── stress/ # 压力测试
+    │   ├── user-api.stress.spec.ts
+    │   └── concurrent-users.stress.spec.ts
+    └── benchmark/ # 基准测试
+        ├── query-performance.benchmark.spec.ts
+        └── memory-usage.benchmark.spec.ts
+```
+
+### 测试文件命名规范
+
+遵循 Nx 的最佳实践，测试文件命名应当与被测试文件保持一致，并添加相应的后缀。
+
+```
+测试文件命名规范
+├── 单元测试: *.spec.ts (与被测试文件同级目录)
+│   ├── user.entity.ts → user.entity.spec.ts # 实体测试
+│   ├── create-user.usecase.ts → create-user.usecase.spec.ts # 用例测试
+│   ├── user.repository.ts → user.repository.spec.ts # 仓储测试
+│   ├── user.service.ts → user.service.spec.ts # 服务测试
+│   ├── user.controller.ts → user.controller.spec.ts # 控制器测试
+│   ├── auth.guard.ts → auth.guard.spec.ts # 守卫测试
+│   └── logging.interceptor.ts → logging.interceptor.spec.ts # 拦截器测试
+├── 集成测试: *.integration.spec.ts (独立目录)
+│   ├── user-api.integration.spec.ts # API集成测试
+│   ├── user-database.integration.spec.ts # 数据库集成测试
+│   ├── user-events.integration.spec.ts # 事件集成测试
+│   └── payment-service.integration.spec.ts # 外部服务集成测试
+├── 端到端测试: *.e2e.spec.ts (独立目录)
+│   ├── user-registration.e2e.spec.ts # 用户注册E2E测试
+│   ├── user-authentication.e2e.spec.ts # 用户认证E2E测试
+│   ├── user-workflow.e2e.spec.ts # 用户工作流E2E测试
+│   └── admin-dashboard.e2e.spec.ts # 管理面板E2E测试
+└── 性能测试: *.performance.spec.ts (独立目录)
+    ├── user-api.performance.spec.ts # API性能测试
+    ├── database-query.performance.spec.ts # 数据库查询性能测试
+    ├── memory-usage.performance.spec.ts # 内存使用性能测试
+    └── concurrent-users.performance.spec.ts # 并发用户性能测试
+```
+
+### 测试数据管理
+
+```
+测试数据管理策略
+├── fixtures/ # 测试数据文件
+│   ├── users/ # 用户测试数据
+│   │   ├── valid-users.json # 有效用户数据
+│   │   ├── invalid-users.json # 无效用户数据
+│   │   └── edge-cases.json # 边界情况数据
+│   ├── organizations/ # 组织测试数据
+│   └── permissions/ # 权限测试数据
+├── factories/ # 测试数据工厂
+│   ├── user.factory.ts # 用户工厂
+│   ├── organization.factory.ts # 组织工厂
+│   └── permission.factory.ts # 权限工厂
+├── mocks/ # 模拟对象
+│   ├── repositories/ # 仓储模拟
+│   ├── services/ # 服务模拟
+│   └── external/ # 外部服务模拟
+└── helpers/ # 测试辅助工具
+    ├── test-database.helper.ts # 测试数据库助手
+    ├── test-events.helper.ts # 测试事件助手
+    └── test-auth.helper.ts # 测试认证助手
+```
+
+### 测试配置管理
+
+```
+测试配置管理
+├── jest.config.ts # Jest主配置
+├── jest-unit.config.ts # 单元测试配置
+├── jest-integration.config.ts # 集成测试配置
+├── jest-e2e.config.ts # E2E测试配置
+├── jest-performance.config.ts # 性能测试配置
+├── test-environment/ # 测试环境配置
+│   ├── test-database.config.ts # 测试数据库配置
+│   ├── test-redis.config.ts # 测试Redis配置
+│   └── test-rabbitmq.config.ts # 测试RabbitMQ配置
+└── coverage/ # 测试覆盖率配置
+    ├── coverage.config.ts # 覆盖率配置
+    └── thresholds/ # 覆盖率阈值
+        ├── unit.threshold.ts # 单元测试阈值
+        ├── integration.threshold.ts # 集成测试阈值
+        └── e2e.threshold.ts # E2E测试阈值
+```
+
+### 测试执行策略
+
+```
+测试执行策略
+├── 开发阶段测试
+│   ├── 单元测试: nx test --watch # 监听模式
+│   ├── 快速集成测试: nx test --testPathPattern=integration
+│   └── 代码覆盖率: nx test --coverage
+├── 提交前测试
+│   ├── 全量单元测试: nx test
+│   ├── 关键集成测试: nx test --testPathPattern=critical
+│   └── 代码质量检查: nx lint && nx test --coverage
+├── 持续集成测试
+│   ├── 全量测试套件: nx run-many --target=test --all
+│   ├── 并行测试执行: nx run-many --target=test --parallel=4
+│   └── 测试报告生成: nx test --coverage --reporter=html
+└── 生产前测试
+    ├── 端到端测试: nx e2e
+    ├── 性能测试: nx performance
+    └── 安全测试: nx security-test
+```
+
+### 测试最佳实践
+
+```
+测试最佳实践
+├── 测试原则
+│   ├── 单一职责: 每个测试只验证一个功能点
+│   ├── 独立性: 测试之间不应相互依赖
+│   ├── 可重复性: 测试结果应保持一致
+│   └── 快速执行: 单元测试应在毫秒级完成
+├── 测试模式
+│   ├── AAA模式: Arrange-Act-Assert
+│   ├── Given-When-Then: 行为驱动开发
+│   ├── 测试替身: Mock、Stub、Spy、Fake
+│   └── 测试数据构建器: Builder Pattern
+├── 测试覆盖策略
+│   ├── 代码覆盖率: 单元测试 > 80%
+│   ├── 分支覆盖率: 关键分支 > 90%
+│   ├── 路径覆盖率: 复杂逻辑 > 95%
+│   └── 集成覆盖率: 关键流程 > 70%
+└── 测试维护
+    ├── 测试重构: 保持测试代码整洁
+    ├── 测试文档: 清晰的测试描述
+    ├── 测试审查: 代码审查包含测试
+    └── 测试监控: 持续监控测试质量
+```
+
+```
+
+```

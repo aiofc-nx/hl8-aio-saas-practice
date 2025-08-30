@@ -1,0 +1,379 @@
+---
+description: 错误处理和异常管理规范
+globs:
+alwaysApply: true
+---
+
+# 错误处理和异常管理规范（Error Handling Specification）
+
+**遵循统一的错误处理策略，确保系统的健壮性和可维护性。**
+
+## **异常分类体系**
+
+### 业务异常（Business Exceptions）
+
+```typescript
+/**
+ * @class UserNotFoundException
+ * @description 用户不存在异常
+ */
+export class UserNotFoundException extends BusinessException {
+  constructor(userId: string) {
+    super(`User with ID ${userId} not found`, 'USER_NOT_FOUND', 404);
+  }
+}
+
+/**
+ * @class InvalidCredentialsException
+ * @description 无效凭据异常
+ */
+export class InvalidCredentialsException extends BusinessException {
+  constructor() {
+    super('Invalid username or password', 'INVALID_CREDENTIALS', 401);
+  }
+}
+```
+
+### 验证异常（Validation Exceptions）
+
+```typescript
+/**
+ * @class ValidationException
+ * @description 数据验证异常
+ */
+export class ValidationException extends BusinessException {
+  constructor(errors: ValidationError[]) {
+    super('Validation failed', 'VALIDATION_ERROR', 400, { errors });
+  }
+}
+```
+
+### 系统异常（System Exceptions）
+
+```typescript
+/**
+ * @class DatabaseConnectionException
+ * @description 数据库连接异常
+ */
+export class DatabaseConnectionException extends SystemException {
+  constructor(error: Error) {
+    super('Database connection failed', 'DB_CONNECTION_ERROR', 500, error);
+  }
+}
+```
+
+## **异常处理策略**
+
+### 分层异常处理
+
+```typescript
+// 领域层异常
+export class DomainException extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly details?: Record<string, unknown>
+  ) {
+    super(message);
+    this.name = 'DomainException';
+  }
+}
+
+// 应用层异常
+export class ApplicationException extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly details?: Record<string, unknown>
+  ) {
+    super(message);
+    this.name = 'ApplicationException';
+  }
+}
+
+// 基础设施层异常
+export class InfrastructureException extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly originalError?: Error
+  ) {
+    super(message);
+    this.name = 'InfrastructureException';
+  }
+}
+```
+
+### 异常过滤器
+
+```typescript
+/**
+ * @class GlobalExceptionFilter
+ * @description 全局异常过滤器
+ */
+@Catch()
+export class GlobalExceptionFilter implements ExceptionFilter {
+  constructor(private readonly logger: PinoLoggerService) {}
+
+  catch(exception: unknown, host: ArgumentsHost) {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse();
+    const request = ctx.getRequest();
+
+    let status = 500;
+    let message = 'Internal server error';
+    let code = 'INTERNAL_ERROR';
+    let details: Record<string, unknown> = {};
+
+    if (exception instanceof BusinessException) {
+      status = exception.statusCode;
+      message = exception.message;
+      code = exception.code;
+      details = exception.details || {};
+    } else if (exception instanceof ValidationException) {
+      status = 400;
+      message = 'Validation failed';
+      code = 'VALIDATION_ERROR';
+      details = { errors: exception.errors };
+    } else if (exception instanceof Error) {
+      message = exception.message;
+      code = 'UNKNOWN_ERROR';
+    }
+
+    // 记录异常日志
+    this.logger.error(
+      `Exception occurred: ${message}`,
+      LogContext.SYSTEM,
+      {
+        path: request.url,
+        method: request.method,
+        code,
+        details,
+      },
+      exception as Error
+    );
+
+    // 返回统一错误响应
+    response.status(status).json({
+      success: false,
+      error: {
+        code,
+        message,
+        details,
+        timestamp: new Date().toISOString(),
+        path: request.url,
+      },
+    });
+  }
+}
+```
+
+## **错误响应格式**
+
+### 标准错误响应
+
+```typescript
+interface ErrorResponse {
+  success: false;
+  error: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+    timestamp: string;
+    path: string;
+    requestId?: string;
+  };
+}
+```
+
+### 错误代码规范
+
+```typescript
+// 认证相关错误
+const AUTH_ERRORS = {
+  INVALID_CREDENTIALS: 'AUTH_001',
+  TOKEN_EXPIRED: 'AUTH_002',
+  INSUFFICIENT_PERMISSIONS: 'AUTH_003',
+  ACCOUNT_LOCKED: 'AUTH_004',
+} as const;
+
+// 用户相关错误
+const USER_ERRORS = {
+  USER_NOT_FOUND: 'USER_001',
+  USER_ALREADY_EXISTS: 'USER_002',
+  INVALID_USER_DATA: 'USER_003',
+} as const;
+
+// 系统相关错误
+const SYSTEM_ERRORS = {
+  DATABASE_ERROR: 'SYS_001',
+  EXTERNAL_SERVICE_ERROR: 'SYS_002',
+  CONFIGURATION_ERROR: 'SYS_003',
+} as const;
+```
+
+## **日志记录规范**
+
+### 异常日志格式
+
+```typescript
+/**
+ * @method logException
+ * @description 记录异常日志
+ */
+private logException(
+  exception: Error,
+  context: string,
+  metadata?: Record<string, unknown>
+): void {
+  this.logger.error(
+    `Exception in ${context}: ${exception.message}`,
+    LogContext.SYSTEM,
+    {
+      ...metadata,
+      stack: exception.stack,
+      name: exception.name,
+    },
+    exception
+  );
+}
+```
+
+### 错误追踪
+
+```typescript
+/**
+ * @method createErrorContext
+ * @description 创建错误上下文
+ */
+private createErrorContext(request: any): Record<string, unknown> {
+  return {
+    requestId: request.headers['x-request-id'],
+    userId: request.user?.id,
+    tenantId: request.headers['x-tenant-id'],
+    userAgent: request.headers['user-agent'],
+    ip: request.ip,
+    method: request.method,
+    url: request.url,
+    timestamp: new Date().toISOString(),
+  };
+}
+```
+
+## **最佳实践**
+
+### 1. 异常处理原则
+
+- **早发现，早处理**: 在异常发生的地方立即处理
+- **统一格式**: 使用统一的异常响应格式
+- **详细日志**: 记录足够的上下文信息
+- **用户友好**: 向用户显示友好的错误信息
+
+### 2. 异常传播
+
+```typescript
+// 不推荐：直接抛出原始异常
+throw new Error('Database error');
+
+// 推荐：包装为业务异常
+throw new DatabaseConnectionException(originalError);
+```
+
+### 3. 异常恢复
+
+```typescript
+/**
+ * @method handleDatabaseError
+ * @description 处理数据库错误
+ */
+private async handleDatabaseError<T>(
+  operation: () => Promise<T>,
+  fallback?: () => Promise<T>
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    this.logger.error('Database operation failed', LogContext.DATABASE, {
+      error: (error as Error).message,
+    });
+
+    if (fallback) {
+      return await fallback();
+    }
+
+    throw new DatabaseConnectionException(error as Error);
+  }
+}
+```
+
+### 4. 重试机制
+
+```typescript
+/**
+ * @method retryOperation
+ * @description 重试操作
+ */
+private async retryOperation<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 1000
+): Promise<T> {
+  let lastError: Error;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+
+      if (attempt === maxRetries) {
+        break;
+      }
+
+      this.logger.warn(
+        `Operation failed, retrying (${attempt}/${maxRetries})`,
+        LogContext.SYSTEM,
+        { error: lastError.message }
+      );
+
+      await new Promise(resolve => setTimeout(resolve, delay * attempt));
+    }
+  }
+
+  throw lastError!;
+}
+```
+
+## **监控和告警**
+
+### 异常监控
+
+```typescript
+/**
+ * @method trackException
+ * @description 追踪异常
+ */
+private trackException(exception: Error, context: string): void {
+  // 发送到监控系统
+  this.metricsService.increment('exceptions.total', {
+    type: exception.name,
+    context,
+  });
+
+  // 严重异常告警
+  if (this.isCriticalException(exception)) {
+    this.alertService.sendAlert({
+      level: 'critical',
+      message: `Critical exception: ${exception.message}`,
+      context,
+      stack: exception.stack,
+    });
+  }
+}
+```
+
+description:
+globs:
+alwaysApply: true
+
+---

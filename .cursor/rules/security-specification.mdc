@@ -1,0 +1,601 @@
+---
+description: 安全规范
+globs:
+alwaysApply: false
+---
+
+# 安全规范（Security Specification）
+
+**遵循安全最佳实践，确保系统的安全性和数据保护。**
+
+## **认证与授权**
+
+### JWT 安全配置
+
+```typescript
+/**
+ * @class JwtSecurityService
+ * @description JWT 安全服务
+ */
+@Injectable()
+export class JwtSecurityService {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly logger: PinoLoggerService
+  ) {}
+
+  /**
+   * @method generateToken
+   * @description 生成安全的 JWT Token
+   */
+  async generateToken(payload: JwtPayload): Promise<string> {
+    const secret = this.configService.get<string>('JWT_SECRET');
+    const expiresIn = this.configService.get<string>('JWT_EXPIRES_IN', '1h');
+
+    // 添加安全声明
+    const securePayload = {
+      ...payload,
+      iat: Math.floor(Date.now() / 1000),
+      jti: this.generateJti(), // JWT ID
+      aud: this.configService.get<string>('JWT_AUDIENCE'), // 受众
+      iss: this.configService.get<string>('JWT_ISSUER'), // 发行者
+    };
+
+    return jwt.sign(securePayload, secret, {
+      expiresIn,
+      algorithm: 'HS256',
+      issuer: securePayload.iss,
+      audience: securePayload.aud,
+    });
+  }
+
+  /**
+   * @method verifyToken
+   * @description 验证 JWT Token
+   */
+  async verifyToken(token: string): Promise<JwtPayload> {
+    const secret = this.configService.get<string>('JWT_SECRET');
+
+    try {
+      const decoded = jwt.verify(token, secret, {
+        algorithms: ['HS256'],
+        issuer: this.configService.get<string>('JWT_ISSUER'),
+        audience: this.configService.get<string>('JWT_AUDIENCE'),
+      }) as JwtPayload;
+
+      // 检查 Token 是否在黑名单中
+      if (await this.isTokenBlacklisted(token)) {
+        throw new UnauthorizedException('Token has been revoked');
+      }
+
+      return decoded;
+    } catch (error) {
+      this.logger.warn('JWT verification failed', LogContext.SECURITY, {
+        error: (error as Error).message,
+      });
+      throw new UnauthorizedException('Invalid token');
+    }
+  }
+
+  /**
+   * @method generateJti
+   * @description 生成 JWT ID
+   */
+  private generateJti(): string {
+    return crypto.randomBytes(16).toString('hex');
+  }
+}
+```
+
+### 密码安全
+
+```typescript
+/**
+ * @class PasswordSecurityService
+ * @description 密码安全服务
+ */
+@Injectable()
+export class PasswordSecurityService {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly logger: PinoLoggerService
+  ) {}
+
+  /**
+   * @method hashPassword
+   * @description 安全地哈希密码
+   */
+  async hashPassword(password: string): Promise<string> {
+    const saltRounds = this.configService.get<number>('BCRYPT_SALT_ROUNDS', 12);
+
+    return bcrypt.hash(password, saltRounds);
+  }
+
+  /**
+   * @method verifyPassword
+   * @description 验证密码
+   */
+  async verifyPassword(password: string, hash: string): Promise<boolean> {
+    return bcrypt.compare(password, hash);
+  }
+
+  /**
+   * @method validatePasswordStrength
+   * @description 验证密码强度
+   */
+  validatePasswordStrength(password: string): PasswordValidationResult {
+    const minLength = 8;
+    const hasUpperCase = /[A-Z]/.test(password);
+    const hasLowerCase = /[a-z]/.test(password);
+    const hasNumbers = /\d/.test(password);
+    const hasSpecialChars = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+
+    const errors: string[] = [];
+
+    if (password.length < minLength) {
+      errors.push(`Password must be at least ${minLength} characters long`);
+    }
+    if (!hasUpperCase) {
+      errors.push('Password must contain at least one uppercase letter');
+    }
+    if (!hasLowerCase) {
+      errors.push('Password must contain at least one lowercase letter');
+    }
+    if (!hasNumbers) {
+      errors.push('Password must contain at least one number');
+    }
+    if (!hasSpecialChars) {
+      errors.push('Password must contain at least one special character');
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      score: this.calculatePasswordScore(password),
+    };
+  }
+
+  /**
+   * @method calculatePasswordScore
+   * @description 计算密码强度分数
+   */
+  private calculatePasswordScore(password: string): number {
+    let score = 0;
+
+    // 长度分数
+    score += Math.min(password.length * 4, 20);
+
+    // 字符类型分数
+    if (/[a-z]/.test(password)) score += 1;
+    if (/[A-Z]/.test(password)) score += 1;
+    if (/\d/.test(password)) score += 1;
+    if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) score += 1;
+
+    // 重复字符惩罚
+    const repeatedChars = /(.)\1{2,}/.test(password) ? -5 : 0;
+    score += repeatedChars;
+
+    return Math.max(0, Math.min(score, 100));
+  }
+}
+```
+
+## **输入验证与清理**
+
+### 数据验证
+
+```typescript
+/**
+ * @class InputValidationService
+ * @description 输入验证服务
+ */
+@Injectable()
+export class InputValidationService {
+  /**
+   * @method sanitizeInput
+   * @description 清理用户输入
+   */
+  sanitizeInput(input: string): string {
+    return DOMPurify.sanitize(input, {
+      ALLOWED_TAGS: [],
+      ALLOWED_ATTR: [],
+    });
+  }
+
+  /**
+   * @method validateEmail
+   * @description 验证邮箱格式
+   */
+  validateEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
+  /**
+   * @method validateUrl
+   * @description 验证 URL 格式
+   */
+  validateUrl(url: string): boolean {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * @method preventSqlInjection
+   * @description 防止 SQL 注入
+   */
+  preventSqlInjection(input: string): string {
+    // 移除危险的 SQL 关键字
+    const dangerousKeywords = [
+      'SELECT',
+      'INSERT',
+      'UPDATE',
+      'DELETE',
+      'DROP',
+      'CREATE',
+      'ALTER',
+      'EXEC',
+      'EXECUTE',
+      'UNION',
+      'SCRIPT',
+      '--',
+      '/*',
+      '*/',
+    ];
+
+    let sanitized = input;
+    dangerousKeywords.forEach((keyword) => {
+      const regex = new RegExp(keyword, 'gi');
+      sanitized = sanitized.replace(regex, '');
+    });
+
+    return sanitized;
+  }
+}
+```
+
+### XSS 防护
+
+```typescript
+/**
+ * @class XssProtectionService
+ * @description XSS 防护服务
+ */
+@Injectable()
+export class XssProtectionService {
+  /**
+   * @method escapeHtml
+   * @description 转义 HTML 字符
+   */
+  escapeHtml(text: string): string {
+    const htmlEscapes: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#x27;',
+      '/': '&#x2F;',
+    };
+
+    return text.replace(/[&<>"'/]/g, (match) => htmlEscapes[match]);
+  }
+
+  /**
+   * @method validateContentSecurityPolicy
+   * @description 验证内容安全策略
+   */
+  validateContentSecurityPolicy(content: string): boolean {
+    const dangerousPatterns = [
+      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+      /javascript:/gi,
+      /on\w+\s*=/gi,
+    ];
+
+    return !dangerousPatterns.some((pattern) => pattern.test(content));
+  }
+}
+```
+
+## **API 安全**
+
+### 速率限制
+
+```typescript
+/**
+ * @class RateLimitService
+ * @description 速率限制服务
+ */
+@Injectable()
+export class RateLimitService {
+  constructor(
+    private readonly redisService: RedisService,
+    private readonly logger: PinoLoggerService
+  ) {}
+
+  /**
+   * @method checkRateLimit
+   * @description 检查速率限制
+   */
+  async checkRateLimit(
+    key: string,
+    limit: number,
+    windowMs: number
+  ): Promise<RateLimitResult> {
+    const current = await this.redisService.incr(key);
+
+    if (current === 1) {
+      await this.redisService.expire(key, Math.floor(windowMs / 1000));
+    }
+
+    const remaining = Math.max(0, limit - current);
+    const resetTime = await this.redisService.ttl(key);
+
+    if (current > limit) {
+      this.logger.warn('Rate limit exceeded', LogContext.SECURITY, {
+        key,
+        current,
+        limit,
+      });
+
+      throw new TooManyRequestsException({
+        message: 'Rate limit exceeded',
+        remaining: 0,
+        resetTime,
+      });
+    }
+
+    return {
+      current,
+      remaining,
+      resetTime,
+    };
+  }
+}
+```
+
+### CORS 配置
+
+```typescript
+/**
+ * @class CorsSecurityService
+ * @description CORS 安全服务
+ */
+@Injectable()
+export class CorsSecurityService {
+  /**
+   * @method getCorsOptions
+   * @description 获取 CORS 配置选项
+   */
+  getCorsOptions(): CorsOptions {
+    return {
+      origin: (origin, callback) => {
+        const allowedOrigins = [
+          'https://app.example.com',
+          'https://admin.example.com',
+        ];
+
+        if (!origin || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      credentials: true,
+      maxAge: 86400, // 24 hours
+    };
+  }
+}
+```
+
+## **数据加密**
+
+### 敏感数据加密
+
+```typescript
+/**
+ * @class DataEncryptionService
+ * @description 数据加密服务
+ */
+@Injectable()
+export class DataEncryptionService {
+  private readonly algorithm = 'aes-256-gcm';
+  private readonly keyLength = 32;
+  private readonly ivLength = 16;
+  private readonly saltLength = 64;
+  private readonly tagLength = 16;
+
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly logger: PinoLoggerService
+  ) {}
+
+  /**
+   * @method encrypt
+   * @description 加密敏感数据
+   */
+  encrypt(text: string): string {
+    const key = this.getEncryptionKey();
+    const iv = crypto.randomBytes(this.ivLength);
+    const salt = crypto.randomBytes(this.saltLength);
+
+    const cipher = crypto.createCipher(this.algorithm, key);
+    cipher.setAAD(salt);
+
+    let encrypted = cipher.update(text, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+
+    const tag = cipher.getAuthTag();
+
+    // 组合 IV + Salt + Tag + Encrypted
+    const result = Buffer.concat([
+      iv,
+      salt,
+      tag,
+      Buffer.from(encrypted, 'hex'),
+    ]);
+
+    return result.toString('base64');
+  }
+
+  /**
+   * @method decrypt
+   * @description 解密敏感数据
+   */
+  decrypt(encryptedData: string): string {
+    const key = this.getEncryptionKey();
+    const data = Buffer.from(encryptedData, 'base64');
+
+    const iv = data.subarray(0, this.ivLength);
+    const salt = data.subarray(this.ivLength, this.ivLength + this.saltLength);
+    const tag = data.subarray(
+      this.ivLength + this.saltLength,
+      this.ivLength + this.saltLength + this.tagLength
+    );
+    const encrypted = data.subarray(
+      this.ivLength + this.saltLength + this.tagLength
+    );
+
+    const decipher = crypto.createDecipher(this.algorithm, key);
+    decipher.setAuthTag(tag);
+    decipher.setAAD(salt);
+
+    let decrypted = decipher.update(encrypted, undefined, 'utf8');
+    decrypted += decipher.final('utf8');
+
+    return decrypted;
+  }
+
+  /**
+   * @method getEncryptionKey
+   * @description 获取加密密钥
+   */
+  private getEncryptionKey(): Buffer {
+    const secret = this.configService.get<string>('ENCRYPTION_SECRET');
+    return crypto.scryptSync(secret, 'salt', this.keyLength);
+  }
+}
+```
+
+## **安全监控**
+
+### 安全事件监控
+
+```typescript
+/**
+ * @class SecurityMonitorService
+ * @description 安全监控服务
+ */
+@Injectable()
+export class SecurityMonitorService {
+  constructor(
+    private readonly logger: PinoLoggerService,
+    private readonly alertService: AlertService
+  ) {}
+
+  /**
+   * @method logSecurityEvent
+   * @description 记录安全事件
+   */
+  logSecurityEvent(
+    event: SecurityEvent,
+    context: Record<string, unknown> = {}
+  ): void {
+    this.logger.warn('Security event detected', LogContext.SECURITY, {
+      event: event.type,
+      severity: event.severity,
+      source: event.source,
+      details: event.details,
+      ...context,
+    });
+
+    // 严重安全事件告警
+    if (event.severity === 'critical') {
+      this.alertService.sendSecurityAlert({
+        level: 'critical',
+        event: event.type,
+        source: event.source,
+        details: event.details,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  /**
+   * @method detectBruteForce
+   * @description 检测暴力破解攻击
+   */
+  async detectBruteForce(
+    identifier: string,
+    maxAttempts: number = 5,
+    windowMs: number = 300000 // 5 minutes
+  ): Promise<boolean> {
+    const key = `login_attempts:${identifier}`;
+    const attempts = await this.redisService.incr(key);
+
+    if (attempts === 1) {
+      await this.redisService.expire(key, Math.floor(windowMs / 1000));
+    }
+
+    if (attempts >= maxAttempts) {
+      this.logSecurityEvent({
+        type: 'BRUTE_FORCE_ATTEMPT',
+        severity: 'high',
+        source: identifier,
+        details: { attempts, maxAttempts },
+      });
+
+      return true;
+    }
+
+    return false;
+  }
+}
+```
+
+## **最佳实践**
+
+### 1. 认证安全
+
+- 使用强密码策略
+- 实现多因子认证
+- 定期轮换密钥
+- 使用安全的会话管理
+
+### 2. 数据保护
+
+- 加密敏感数据
+- 实现数据脱敏
+- 定期备份数据
+- 安全删除数据
+
+### 3. 网络安全
+
+- 使用 HTTPS
+- 配置防火墙
+- 实现网络分段
+- 监控网络流量
+
+### 4. 应用安全
+
+- 输入验证和清理
+- 防止 SQL 注入
+- 防止 XSS 攻击
+- 实现 CSRF 保护
+
+### 5. 监控和响应
+
+- 实时安全监控
+- 安全事件响应
+- 定期安全审计
+- 安全培训
+  description:
+  globs:
+  alwaysApply: true
+
+---
